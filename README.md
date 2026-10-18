@@ -98,3 +98,15 @@ python -m metricdamage.statistics --records runs/main/metricdamage/records.jsonl
 ```
 
 Supply --reference with a matched record file for paired differences. Resampling uses independent case IDs, or explicit cluster IDs when provided. Repeated observations from one source unit must share cluster. Zero-event bounds refer to an event in an independent cluster.
+
+## Fixed reproduction setting
+
+Recorded post-action dimension observations; final mean/covariance and measured costs; matched passive/dominant/trace comparisons.
+
+The checked-in entry point fixes data seeds, methods, budgets and output paths. Inspect its commands without starting any computation:
+
+```bash
+python reproduce.py --plan --data data/data
+```
+
+Remove `--plan` to execute the registered pipeline in a fresh output directory. The entry point calls the existing implementation; it does not insert paper results. Installation uses the package instructions above.
