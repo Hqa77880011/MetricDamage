@@ -1,4 +1,4 @@
-"""Recorded post-action dimension observations; final mean/covariance and measured costs; matched passive/dominant/trace comparisons."""
+"""Finite geometry and independent post-action sensors; selected observations update dimension means/covariances."""
 
 import argparse
 import json
@@ -16,16 +16,20 @@ def absolute_path(value):
 
 def build_steps(args):
     output = (ROOT / args.output).resolve()
-    return [
-        ["-m", "metricdamage", "run", "--data", args.data, "--methods", "metricdamage", "passive", "trace_utility", "--output", str(output / "comparison")],
+    source = args.data or str(output / 'input.jsonl')
+    steps = []
+    if not args.data:
+        steps.append(['finite_data.py', '--output', str(output / 'input.jsonl'), '--count', '200', '--seed', '17'])
+    return steps + [
+        ["-m", "metricdamage", "run", "--data", source, "--methods", "metricdamage", "passive", "trace_utility", "--output", str(output / "comparison")],
     ]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", default='runs/fixed-setting')
+    parser.add_argument("--output", default='runs/finite-setting')
     parser.add_argument("--plan", action="store_true", help="Print commands without creating data, fitting, inference or evaluation")
-    parser.add_argument('--data', required=True, type=absolute_path)
+    parser.add_argument('--data', type=absolute_path, help='Optional prepared input; otherwise generate the finite setting')
     args = parser.parse_args()
     output = (ROOT / args.output).resolve()
     if not args.plan and output.exists():

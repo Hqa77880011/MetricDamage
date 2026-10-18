@@ -101,12 +101,11 @@ Supply --reference with a matched record file for paired differences. Resampling
 
 ## Fixed reproduction setting
 
-Recorded post-action dimension observations; final mean/covariance and measured costs; matched passive/dominant/trace comparisons.
-
-The checked-in entry point fixes data seeds, methods, budgets and output paths. Inspect its commands without starting any computation:
+The default setting generates 200 finite geometry episodes (seed 17). Each candidate action has an independent positive lognormal dimension sensor (1.5% lateral / 2.5% forward relative noise), an 8% failure probability and explicitly modeled motion costs. The selected action's reading updates both the dimension mean and covariance through the existing observation interface. Latent dimensions drive the finite sensor; the action selector sees prior geometry and receipts, while scoring alone reads truth.
 
 ```bash
-python reproduce.py --plan --data data/data
+python reproduce.py --plan
+python reproduce.py --output runs/finite-setting
 ```
 
-Remove `--plan` to execute the registered pipeline in a fresh output directory. The entry point calls the existing implementation; it does not insert paper results. Installation uses the package instructions above.
+The entry point runs `finite_data.py --output runs/finite-setting/input.jsonl --count 200 --seed 17` and then the existing `metricdamage run` comparison (metricdamage/passive/trace_utility). Generator provenance is retained in each receipt. Sensor values and costs are finite-model quantities, not physical robot measurements. Optional `--data recorded.jsonl` uses externally recorded episodes with the same schema.
