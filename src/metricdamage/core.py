@@ -64,6 +64,33 @@ def covariance_intersection(mean1, covariance1, mean2, covariance2):
     return mean, covariance
 
 
+def fuse_observation(mean, covariance, observation):
+    """Fuse a realized dimension observation, preserving unknown correlation."""
+    measured = np.asarray(observation["dimensions"], dtype=float)
+    noise = np.asarray(observation["covariance"], dtype=float)
+    if measured.shape != (3,) or not np.isfinite(measured).all() or np.any(measured <= 0):
+        raise ValueError("Observed length/width/area must be three finite positive values")
+    if (
+        noise.shape != (3, 3)
+        or not np.isfinite(noise).all()
+        or not np.allclose(noise, noise.T)
+        or np.linalg.eigvalsh(noise).min() <= 0
+    ):
+        raise ValueError("Observed dimension covariance must be positive definite")
+    if type(observation.get("independent")) is not bool:
+        raise ValueError("Declare whether the observation is independent of the prior")
+    if not observation["independent"]:
+        return covariance_intersection(mean, covariance, measured, noise)
+    # A realized measurement, rather than predicted information, moves the mean.
+    gain = np.linalg.solve(covariance + noise, covariance).T
+    following_mean = mean + gain @ (measured - mean)
+    identity = np.eye(3)
+    following_covariance = (
+        (identity - gain) @ covariance @ (identity - gain).T + gain @ noise @ gain.T
+    )
+    return following_mean, (following_covariance + following_covariance.T) / 2
+
+
 def generate(rng, count):
     for index in range(count):
         length, width = rng.uniform(0.2, 1), rng.uniform(0.01, 0.1)
@@ -115,7 +142,7 @@ def generate(rng, count):
         }
 
 
-def run_case(case, method):
+def run_case(case, method, observer=None):
     theta = np.asarray(case["theta"], dtype=float)
     boundary = np.asarray(case["boundary"], dtype=float)
     covariance = np.asarray(case["joint_covariance"], dtype=float)
@@ -164,13 +191,41 @@ def run_case(case, method):
         or selected[1] <= case["minimum_gain"]
     ):
         selected = None
+    final_mean, final_covariance = mean, propagated
+    observation = None
+    action_status = "passive"
+    if selected is not None:
+        action_index = selected[2]
+        name = case["actions"][action_index]["name"]
+        observation = (
+            observer(case["id"], name)
+            if observer is not None
+            else case.get("observations", {}).get(name)
+        )
+        action_status = "pending"
+        if observation is not None:
+            if observation.get("case_id") != case["id"] or observation.get("action") != name:
+                raise ValueError("Action observation does not match the selected case/action")
+            action_status = observation.get("status")
+            if action_status not in ("observed", "failed"):
+                raise ValueError("Action receipt status must be observed or failed")
+            costs = [observation.get("cost"), observation.get("seconds")]
+            if any(value is None or not np.isfinite(value) or value < 0 for value in costs):
+                raise ValueError("Action receipt requires measured nonnegative cost and seconds")
+            if action_status == "observed":
+                final_mean, final_covariance = fuse_observation(mean, propagated, observation)
     return {
         "valid": True,
-        "dimensions": mean.tolist(),
-        "covariance": propagated.tolist(),
+        "dimensions": final_mean.tolist(),
+        "covariance": final_covariance.tolist(),
+        "prior_dimensions": mean.tolist(),
+        "prior_covariance": propagated.tolist(),
         "action": selected[2] if selected is not None else None,
+        "action_status": action_status,
+        "observation": observation,
         "predicted_gain": selected[1] if selected is not None else 0.0,
-        "updated_covariance": selected[3].tolist() if selected is not None else propagated.tolist(),
+        "predicted_covariance": selected[3].tolist() if selected is not None else propagated.tolist(),
+        "updated_covariance": final_covariance.tolist(),
     }
 
 
@@ -193,6 +248,13 @@ def score(case, result):
     radius = norm.ppf(0.95) * std
     action = case["actions"][result["action"]] if result["action"] is not None else None
     gain = result["predicted_gain"]
+    observed = result["action_status"] == "observed"
+    receipt = result["observation"]
+    prior = np.asarray(result["prior_dimensions"])
+    W = np.diag(1 / np.asarray(case["tolerances"]))
+    prior_risk = np.linalg.eigvalsh(W @ np.asarray(result["prior_covariance"]) @ W)[-1]
+    final_risk = np.linalg.eigvalsh(W @ np.asarray(result["covariance"]) @ W)[-1]
+    actual_gain = float(prior_risk - final_risk) if observed else None
     return {
         "invalid_measurement": 0,
         "width_mae_cm": float(abs(errors[1]) * 100),
@@ -201,8 +263,20 @@ def score(case, result):
         "coverage90": float(np.mean(np.abs(errors) <= radius)),
         "interval_width90": float(np.mean(2 * radius)),
         "bias_width_cm": float(errors[1] * 100),
-        "predicted_risk_reduction_per_meter": gain / action["cost"] if action else None,
-        "predicted_risk_reduction_per_second": gain / action["seconds"] if action else None,
-        "extra_captures": int(action is not None),
+        "predicted_risk_reduction_per_meter": gain / action["cost"]
+        if action and action["cost"] > 0 else None,
+        "predicted_risk_reduction_per_second": gain / action["seconds"]
+        if action and action["seconds"] > 0 else None,
+        "observed_risk_reduction_per_meter": actual_gain / receipt["cost"]
+        if observed and receipt["cost"] > 0 else None,
+        "observed_risk_reduction_per_second": actual_gain / receipt["seconds"]
+        if observed and receipt["seconds"] > 0 else None,
+        "width_error_improvement_cm": float((abs(prior[1] - truth[1]) - abs(errors[1])) * 100)
+        if observed else None,
+        "action_pending": int(result["action_status"] == "pending"),
+        "action_failures": int(result["action_status"] == "failed"),
+        "motion_cost": receipt["cost"] if receipt is not None else 0.0,
+        "capture_seconds": receipt["seconds"] if receipt is not None else 0.0,
+        "extra_captures": int(observed),
         "legal_effects": 1,
     }

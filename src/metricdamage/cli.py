@@ -1,5 +1,6 @@
 import argparse
 import csv
+import importlib
 import json
 import random
 import time
@@ -63,13 +64,13 @@ def summarize(rows):
     return report
 
 
-def execute(cases, method, output):
+def execute(cases, method, output, observer=None):
     rows = []
     process = psutil.Process()
     for case in cases:
         start_cpu = time.process_time()
         start = time.perf_counter()
-        result = core.run_case(case, method)
+        result = core.run_case(case, method, observer)
         elapsed = time.perf_counter() - start
         cpu = time.process_time() - start_cpu
         metrics = core.score(case, result)
@@ -153,6 +154,7 @@ def main():
         item = sub.add_parser(name)
         item.add_argument("--data", required=True)
         item.add_argument("--output", required=True)
+        item.add_argument("--observer", help="Trusted module:function(case_id, action_name)")
         item.add_argument(
             "--methods",
             nargs="+",
@@ -172,8 +174,12 @@ def main():
         write_jsonl(args.output, rows)
     elif args.command in ("run", "suite"):
         cases = read_jsonl(args.data)
+        observer = None
+        if args.observer:
+            module, function = args.observer.rsplit(":", 1)
+            observer = getattr(importlib.import_module(module), function)
         for method in args.methods:
-            execute(cases, method, Path(args.output) / method)
+            execute(cases, method, Path(args.output) / method, observer)
     else:
         plot(args.inputs, args.output)
 
